@@ -2,6 +2,8 @@
 
 ![Gmail MCP Server Banner](banner.png)
 
+**A self-hosted Model Context Protocol server for Gmail.** Connect multiple accounts and give Claude — or any MCP client — 17 tools to search, triage, label, trash, unsubscribe, and filter mail, with encrypted token storage and server-side safety rails.
+
 ## Project Overview
 
 AI assistants ship with Gmail integrations that read a single inbox and stop there: no archiving, no labeling, no trash, no unsubscribe, no filters, and no second account. Real mailbox maintenance — triaging years of promotions, unsubscribing from dead newsletters, filing receipts, setting up filters so the mess does not return — needs write access, batch operations, and safety rails, across every account you own.
