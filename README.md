@@ -1,329 +1,181 @@
-# Gmail MCP Server
-
-### Multi-Account Gmail for AI Agents & Assistants
-
-An open-source [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that gives AI agents and assistants full read and write access to Gmail. Connect multiple Gmail accounts, search emails, archive, label, and auto-unsubscribe. All through one server.
+# Gmail MCP Server: Multi-Account Gmail for AI Agents
 
 ![Gmail MCP Server Banner](banner.png)
 
-Works with **Claude**, **OpenClaw**, **Cursor**, **Windsurf**, **Cline**, **Continue**, and any MCP-compatible client.
+## Project Overview
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template?template=https://github.com/navbuildz/gmail-mcp-server)
+AI assistants ship with Gmail integrations that read a single inbox and stop there: no archiving, no labeling, no trash, no unsubscribe, no filters, and no second account. Real mailbox maintenance — triaging years of promotions, unsubscribing from dead newsletters, filing receipts, setting up filters so the mess does not return — needs write access, batch operations, and safety rails, across every account you own.
 
----
+This project is a self-hosted [Model Context Protocol](https://modelcontextprotocol.io) server that gives any MCP client full read and write control over multiple Gmail accounts through **17 tools**. It runs as a single stateless HTTP service you deploy once; accounts are connected through a password-protected setup page using Google OAuth, and refresh tokens are stored **AES-256-GCM encrypted** at rest.
 
-## Why This Exists
+Two authentication modes cover the two kinds of MCP clients: a **static bearer token** for clients that can send headers (Claude Code, Cursor, curl), and **OAuth 2.1 via WorkOS AuthKit** (RFC 9728 resource server) for claude.ai's web connector, which cannot. Destructive operations are engineered defensively: batch trash is capped and previewable, permanent deletion sits behind an explicit `confirm:true` gate and a separate opt-in OAuth scope.
 
-Most AI tools ship with a Gmail integration that can only read emails from a single account. No archiving. No labeling. No unsubscribing. And if you use multiple Gmail accounts? You're out of luck.
+## How It Works
 
-This MCP server fixes that. One server, all your accounts, full read and write access.
+```
+Claude Code / Cursor / curl              claude.ai (web connector)
+  Authorization: Bearer <MCP_API_KEY>      OAuth 2.1 login via WorkOS AuthKit
+        |                                        |
+        +--------------------+-------------------+
+                             v
+                POST /mcp  (Streamable HTTP, stateless)
+                             |
+                     auth middleware
+          static bearer  OR  AuthKit JWT (verified via JWKS)
+                             |
+                McpServer -- fresh instance per request
+                             |
+                     AccountService
+        account email -> cached OAuth2 client -> access token
+                             |
+                     Gmail API (googleapis)
+```
 
-## Gmail MCP Server vs Built-in Connectors
+1. **Connecting an account** happens once, in a browser: the admin opens `/setup` (password-protected), clicks *Add Gmail Account*, and completes Google's consent screen. The server exchanges the code for a refresh token, encrypts it (AES-256-GCM, key derived via scrypt), and persists it to `data/accounts.json`. The OAuth `state` parameter is a single-use server-side nonce — nothing sensitive travels through Google's redirect chain.
+2. **Serving a tool call**: every `/mcp` request is authenticated, gets a fresh MCP server instance, resolves the `account` parameter (a connected address, or `all` to fan out), and reuses a cached per-account OAuth client so access tokens are only re-exchanged when they expire.
+3. **Failing loudly**: per-account errors are returned in an `error` field next to the results — an expired token is distinguishable from an empty inbox. Missing-scope 403s from Gmail are translated into messages that say exactly which scope and which re-consent step is needed.
 
-| Feature | Built-in Gmail (Claude) | Gmail MCP Server |
-|---|---|---|
-| Read emails | Yes | Yes |
-| Write / modify emails | No | **Yes** |
-| Multiple Gmail accounts | No | **Yes** |
-| Archive emails | No | **Yes** |
-| Apply labels | No | **Yes** |
-| Auto-unsubscribe | No | **Yes** |
-| Works with OpenClaw | No | **Yes** |
-| Works with Cursor | No | **Yes** |
-| Works with Windsurf | No | **Yes** |
-| Works with Cline | No | **Yes** |
-| Open source | No | **Yes** |
-
----
-
-## What is an MCP Server?
-
-[Model Context Protocol (MCP)](https://modelcontextprotocol.io) is an open standard that lets AI agents and assistants connect to external tools and data sources. An MCP server exposes tools that any compatible client can call. Think of it as a plugin system for AI.
-
-This Gmail MCP server turns any MCP-compatible AI client into a full-featured email agent.
-
----
-
-## Gmail MCP Server Features
-
-- **Multi-account support.** Connect multiple Gmail accounts and switch between them, or query all at once.
-- **Full read and write access.** Not just reading emails. Archive, label, modify, and unsubscribe.
-- **Gmail search syntax.** Use Gmail's query language: `is:unread`, `from:`, `newer_than:7d`, `has:attachment`, and more.
-- **Auto-unsubscribe.** Finds and triggers unsubscribe links automatically. Supports List-Unsubscribe headers, mailto links, and body link scanning.
-- **Batch operations.** Fetch batches of emails for AI-powered triage and bulk actions.
-- **Secure by design.** OAuth 2.0 authentication, AES-256-GCM encrypted token storage, minimal Gmail scopes.
-- **Deploy anywhere.** Railway, Docker, or your own server.
-
----
-
-## Available Tools
+## Tools
 
 | Tool | Description |
 |---|---|
 | `list_accounts` | List all connected Gmail accounts |
-| `list_emails` | Search and list emails using Gmail query syntax. Supports `account="all"` |
-| `get_email` | Get full email content, headers, and parsed unsubscribe links |
-| `archive_email` | Archive an email by removing it from the inbox |
-| `apply_label` | Apply a label to an email. Creates the label if it doesn't exist |
-| `unsubscribe_email` | Auto-unsubscribe from mailing lists and newsletters |
+| `list_emails` | Search emails with Gmail query syntax. Supports `account="all"` |
+| `get_email` | Full content, headers, and parsed unsubscribe links |
 | `batch_process` | Fetch a batch of emails for triage. Supports `account="all"` |
-| `mark_read` / `mark_unread` | Toggle the UNREAD label on an email |
-| `trash_email` / `untrash_email` | Move an email to trash / restore it (reversible ~30 days) |
-| `batch_trash` | Trash many emails by query or ID list; capped by `max`, supports `dry_run` preview |
-| `delete_email` / `batch_delete` | PERMANENT deletion; requires `confirm:true` and the full Gmail scope (see below) |
-| `list_labels` | List all labels with IDs and types |
-| `remove_label` | Remove a label from an email (no-op if absent) |
-| `create_filter` | Create a Gmail filter (auto-label, auto-archive, or auto-trash future mail) |
+| `archive_email` | Remove an email from the inbox (stays in All Mail) |
+| `apply_label` / `remove_label` | Add or remove a label by name; labels are created on demand, removal is a clean no-op if absent |
+| `list_labels` | All labels with IDs and types |
+| `mark_read` / `mark_unread` | Toggle the UNREAD label |
+| `trash_email` / `untrash_email` | Move to trash / restore (reversible for ~30 days) |
+| `batch_trash` | Trash by query or explicit ID list; refuses to exceed `max` (default 50); `dry_run:true` previews id/subject/from without acting |
+| `delete_email` / `batch_delete` | **Permanent** deletion; requires `confirm:true` and the full Gmail scope |
+| `unsubscribe_email` | RFC 8058 one-click POST first, then `mailto:`, then header/body links |
+| `create_filter` | Auto-label, auto-archive, or auto-trash future matching mail |
 
-**Scopes:** trash, untrash, labels, and read-state work under `gmail.modify`. Filters need `gmail.settings.basic` (requested by default — accounts connected before this scope was added must be re-added via `/setup`). Permanent deletion (`delete_email`, `batch_delete`) is the one thing Gmail only allows under the full `https://mail.google.com/` scope: set `GMAIL_FULL_ACCESS=true`, restart, and re-add the account via `/setup` to enable it.
+### OAuth scopes
 
----
+| Capability | Scope | Requested |
+|---|---|---|
+| Read, archive, label, trash, mark read | `gmail.modify` | Always |
+| Filters (`create_filter`) | `gmail.settings.basic` | Always |
+| Permanent delete (`delete_email`, `batch_delete`) | `https://mail.google.com/` | Only with `GMAIL_FULL_ACCESS=true` |
 
-## Setup Guide: Deploy in 5 Minutes
+Changing scopes requires re-adding affected accounts via `/setup` (Google re-consent). Everything except permanent deletion works under the default scopes — this is deliberate; the full-mailbox scope is the only one Gmail accepts for `messages.delete`.
 
-### Prerequisites
+## Quick Start
 
-1. A [Google Cloud](https://console.cloud.google.com) project with the **Gmail API** enabled
-2. OAuth 2.0 credentials (Web application type)
-3. A hosting platform ([Railway](https://railway.app), your own server, or Docker)
+### 1. Create a Google OAuth client
 
-### Step 1: Google Cloud Setup
+1. In [Google Cloud Console](https://console.cloud.google.com), create or pick a project and enable the **Gmail API**.
+2. Configure the OAuth consent screen (External). Add the Gmail addresses you will connect as **test users** — or publish the app to production so refresh tokens do not expire after 7 days.
+3. Create an OAuth client ID of type **Web application** with the redirect URI `https://<your-server>/oauth/callback`.
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com) and create a new project
-2. Enable the **Gmail API** (APIs & Services → Library → search "Gmail API" → Enable)
-3. Configure the **OAuth consent screen**:
-   - User type: External
-   - Add scopes: `gmail.readonly`, `gmail.modify`
-   - Add your Gmail addresses as test users
-4. Create **OAuth credentials**:
-   - APIs & Services → Credentials → Create Credentials → OAuth client ID
-   - Application type: Web application
-   - Authorized redirect URI: `https://your-server-url/oauth/callback`
-   - Save the **Client ID** and **Client Secret**
+### 2. Deploy the server
 
-### Step 2: Deploy
+Environment variables (see `.env.example`):
 
-#### Option A: Deploy to Railway (Recommended)
-
-1. Click the Deploy button above, or create a new project on [Railway](https://railway.app) connected to this repo
-2. Add these environment variables:
-
-| Variable | Value |
+| Variable | Purpose |
 |---|---|
-| `GOOGLE_CLIENT_ID` | Your OAuth Client ID |
-| `GOOGLE_CLIENT_SECRET` | Your OAuth Client Secret |
-| `ENCRYPTION_KEY` | Any random string (32+ characters) |
-| `ADMIN_PASSWORD` | Password for the setup page |
-| `MCP_API_KEY` | (Recommended) Bearer token required on `/mcp` — without it the endpoint is open to anyone with the URL |
-| `SERVER_URL` | Your Railway app URL (e.g., `https://your-app.railway.app`) |
-| `PORT` | `3000` |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | The OAuth client from step 1 |
+| `ADMIN_PASSWORD` | Guards the `/setup` page |
+| `ENCRYPTION_KEY` | Random string (32+ chars); encrypts stored refresh tokens |
+| `SERVER_URL` | Public HTTPS base URL of this server |
+| `MCP_API_KEY` | Static bearer token for `/mcp` (recommended) |
+| `WORKOS_AUTHKIT_DOMAIN` | AuthKit tenant for claude.ai OAuth (optional) |
+| `GMAIL_FULL_ACCESS` | `true` to request the permanent-deletion scope |
+| `DATA_DIR` / `TOKENS_DATA` | Token storage directory / base64 env fallback |
 
-3. Generate a domain in Railway (Service → Settings → Networking → Generate Domain)
-4. Update `SERVER_URL` with the generated domain
-5. Update the **Authorized redirect URI** in Google Cloud Console to `https://your-domain.railway.app/oauth/callback`
+Without `MCP_API_KEY` **and** without `WORKOS_AUTHKIT_DOMAIN`, `/mcp` is unauthenticated — anyone with the URL can read every connected mailbox. The server warns loudly at startup; do not run a public deployment that way.
 
-#### Option B: Self-Host
+<details>
+<summary>Self-host (Node 20+)</summary>
 
 ```bash
-git clone https://github.com/navbuildz/gmail-mcp-server.git
+git clone https://github.com/tr4m0ryp/gmail-mcp-server.git
 cd gmail-mcp-server
-npm install
-cp .env.example .env
-# Edit .env with your values
+npm ci
+cp .env.example .env   # fill in values
 npm run build
 npm start
 ```
+</details>
 
-#### Option C: Docker
+<details>
+<summary>Docker</summary>
 
 ```bash
 docker build -t gmail-mcp-server .
-docker run -p 3000:3000 \
-  -e GOOGLE_CLIENT_ID=your-client-id \
-  -e GOOGLE_CLIENT_SECRET=your-client-secret \
-  -e ENCRYPTION_KEY=your-random-string \
-  -e ADMIN_PASSWORD=your-password \
-  -e SERVER_URL=https://your-domain.com \
-  gmail-mcp-server
+docker run -p 3000:3000 --env-file .env -v "$PWD/data:/app/data" gmail-mcp-server
 ```
 
-### Step 3: Connect Gmail Accounts
+Mount `/app/data` so connected accounts survive container replacement. claude.ai requires HTTPS — put a TLS proxy (Caddy, nginx, a platform load balancer) in front, or deploy on a platform that terminates TLS (Railway, Cloud Run).
+</details>
 
-1. Visit `https://your-server-url/setup`
-2. Enter your admin password
-3. Click **+ Add Gmail Account**
-4. Sign in with Google and grant permissions
-5. Repeat for each Gmail account you want to connect
+### 3. Connect accounts
 
-> **Railway users:** After adding accounts, copy the `TOKENS_DATA` value shown on the setup page and add it as an environment variable in Railway. This keeps your accounts connected across redeploys.
+Open `https://<your-server>/setup`, enter the admin password, click **+ Add Gmail Account**, and complete Google sign-in. Repeat per account. `/health` reports the connected-account count.
 
----
+## Usage
 
-## How to Connect Gmail MCP Server to Claude
+**claude.ai (web)** — requires `WORKOS_AUTHKIT_DOMAIN` set and *Dynamic Client Registration* enabled in the WorkOS dashboard (Applications -> Configuration). Settings -> Connectors -> Add custom connector -> URL `https://<your-server>/mcp`, OAuth fields blank. claude.ai discovers AuthKit via the RFC 9728 metadata and drives the login itself. Anyone who can log in to your AuthKit tenant gets mailbox access — restrict sign-ups.
 
-1. Go to [Claude](https://claude.ai) → Settings → Connectors
-2. Click **+** → Add custom connector
-3. Fill in:
-   - **Name**: `Gmail` (or any name you prefer)
-   - **Remote MCP server URL**: `https://your-server-url/mcp`
-   - Leave OAuth fields blank
-4. Click **Add**
-5. Start a new conversation and try: *"List my connected Gmail accounts"*
+**Claude Code / header-capable clients** — send the static bearer:
 
----
-
-## How to Connect Gmail MCP Server to Cursor
-
-Add to your Cursor MCP settings (`.cursor/mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "gmail": {
-      "url": "https://your-server-url/mcp"
-    }
-  }
-}
+```bash
+claude mcp add gmail --transport http https://<your-server>/mcp \
+  --header "Authorization: Bearer <MCP_API_KEY>"
 ```
 
----
+**Cursor / Windsurf / Cline** — point the MCP config at `https://<your-server>/mcp` with the same `Authorization` header.
 
-## How to Connect Gmail MCP Server to Windsurf
-
-Add to your Windsurf MCP configuration:
-
-```json
-{
-  "mcpServers": {
-    "gmail": {
-      "serverUrl": "https://your-server-url/mcp"
-    }
-  }
-}
-```
-
----
-
-## Multi-Account Gmail Setup
-
-Connect as many Gmail accounts as you need. Every tool accepts an `account` parameter:
-
-- Use a specific email: `"account": "user@gmail.com"`
-- Query all accounts at once: `"account": "all"`
-
-**Example prompts you can try:**
-- *"Show me unread emails from the last 2 days across all accounts"*
-- *"Archive all promotional emails in user@gmail.com"*
-- *"Unsubscribe from newsletters in all accounts"*
-- *"Find emails with attachments from the last week in work@gmail.com"*
-
----
-
-## Auto-Unsubscribe from Newsletters with AI
-
-The `unsubscribe_email` tool handles the entire unsubscribe process:
-
-1. Checks the `List-Unsubscribe` header (RFC 8058 one-click POST)
-2. Tries HTTP unsubscribe links from the header
-3. Sends an unsubscribe email via `mailto:` links
-4. Scans the email body for unsubscribe URLs
-5. Returns manual links if automatic unsubscribe isn't possible
-
-Try it: *"Find newsletters from the last month and unsubscribe from all of them"*
-
----
-
-## Supported MCP Clients
-
-| Client | Status | Configuration |
-|---|---|---|
-| [Claude](https://claude.ai) (Web, Desktop, Code) | Supported | Custom connector → Remote MCP server URL |
-| [OpenClaw](https://openclaw.com) | Supported | MCP configuration |
-| [Cursor](https://cursor.com) | Supported | `.cursor/mcp.json` |
-| [Windsurf](https://codeium.com/windsurf) | Supported | MCP configuration |
-| [Cline](https://github.com/cline/cline) | Supported | MCP settings |
-| [Continue](https://continue.dev) | Supported | MCP configuration |
-| Any MCP-compatible client | Supported | Point to the `/mcp` endpoint |
-
----
-
-## Architecture
+Then, in a conversation:
 
 ```
-AI Agent / Assistant (Claude, OpenClaw, Cursor, Windsurf, Cline)
-  ↓ MCP Protocol (Streamable HTTP)
-Gmail MCP Server (Railway / Self-hosted / Docker)
-  ├── /mcp             MCP endpoint (tools)
-  ├── /setup           Admin page (add/remove accounts)
-  ├── /oauth/callback  Google OAuth callback
-  └── Token Store      Encrypted refresh tokens
-        ↓
-Gmail API (per-account OAuth tokens)
+"List my connected Gmail accounts"
+"Find unread newsletters older than a month across all accounts,
+ dry-run a batch trash, show me the list, then do it"
+"Unsubscribe me from everything I haven't opened this year"
+"Create a filter that archives receipts from amazon.com into a Receipts label"
 ```
 
----
+The Gmail query language works everywhere a `query` parameter appears: `is:unread`, `from:user@example.com`, `newer_than:7d`, `category:promotions`, `has:attachment`, `larger:5M`, `after:2025/01/01 before:2025/02/01`.
 
-## Security
+## Technical Details
 
-- **OAuth 2.0** for authentication with Google
-- **AES-256-GCM** encrypted refresh token storage
-- **Minimal scopes** using only `gmail.readonly` and `gmail.modify`
-- **No passwords stored.** Your Gmail password never touches the server
-- **Password-protected setup.** The `/setup` page requires admin authentication
-- **Revocable anytime** from [Google Account Permissions](https://myaccount.google.com/permissions)
+```
+src/
+  index.ts      entry -- wires config, token store, accounts, HTTP app
+  config.ts     fail-fast env validation, scope selection
+  auth/         AES-256-GCM token crypto, encrypted TokenStore,
+                Google OAuth2 client factory
+  gmail/        GmailService + domain logic: MIME body extraction,
+                unsubscribe (RFC 8058), labels, batch trash, filters,
+                scope-error translation
+  mcp/          account resolution with cached OAuth clients,
+                McpServer factory, tools/ (search, message, trash, labels)
+  http/         Express assembly: admin auth (timing-safe), setup page,
+                OAuth routes (nonce state store), MCP transport,
+                bearer + AuthKit JWT auth, RFC 9728 metadata
+```
 
----
+Design decisions worth knowing:
 
-## Gmail Search Query Examples
+- **Stateless MCP transport.** Each request builds and tears down a server instance; there is no session state to leak or replay. Horizontal scaling only needs a shared `data/` volume.
+- **Two auth modes, one endpoint.** The auth middleware accepts either credential; discovery metadata (`/.well-known/oauth-protected-resource`) is only served when AuthKit is configured. Missing both falls back to authless with a startup warning, for local development.
+- **Safety rails are server-side, not prompt-side.** The cap on `batch_trash`, the `confirm:true` gate on deletion, and the dry-run preview are enforced in code, so a confused model cannot bulk-delete by accident.
+- **Timing-safe comparisons** for the admin password and bearer token; secrets never appear in OAuth `state` or logs.
 
-The `list_emails` and `batch_process` tools accept Gmail's full search syntax:
+## Roadmap
 
-| Query | What it finds |
-|---|---|
-| `is:unread` | Unread emails |
-| `is:unread newer_than:2d` | Unread emails from the last 2 days |
-| `from:user@example.com` | Emails from a specific sender |
-| `subject:invoice` | Emails with "invoice" in the subject |
-| `has:attachment` | Emails with attachments |
-| `category:promotions` | Promotional emails |
-| `newer_than:7d` | Emails from the last week |
-| `after:2025/01/01 before:2025/02/01` | Emails in a date range |
-| `label:important is:unread` | Unread important emails |
-| `larger:5M` | Emails larger than 5MB |
+- `send_email` / draft tools (compose, reply)
+- Session-cookie admin auth with rate limiting (replacing the query-string password)
+- SSRF guard for unsubscribe link fetching (private-IP blocklist or confirm-first mode)
+- Unit tests for the pure domain logic (body extraction, link parsing, crypto round-trip)
+- Multi-stage Docker build
 
----
+## Disclaimer & License
 
-## Contributing
+This server holds OAuth refresh tokens for every mailbox you connect. Treat the host, the `ENCRYPTION_KEY`, and the MCP credentials like the mailbox passwords they effectively are. `unsubscribe_email` visits links found in emails, which can confirm to a sender that your address is live — use it on mail you already receive, not suspected spam. Permanent deletion is exactly that; nothing recovers a hard-deleted message. Access is revocable anytime at [Google Account Permissions](https://myaccount.google.com/permissions).
 
-Want to help make this better? Here are some open ideas:
-
-- [ ] Add `send_email` tool for composing and sending emails
-- [ ] Add `reply_to_email` tool
-- [ ] Add email attachment download support
-- [ ] Add `delete_email` tool
-- [ ] Add `mark_as_read` / `mark_as_unread` tools
-- [ ] Add `remove_label` tool
-- [ ] Add support for Google Workspace accounts
-
-PRs are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
----
-
-## Tech Stack
-
-- **Runtime**: Node.js 20+
-- **Language**: TypeScript
-- **MCP SDK**: [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk)
-- **Gmail API**: [googleapis](https://github.com/googleapis/google-api-nodejs-client)
-- **HTTP**: Express 5
-- **Auth**: Google OAuth 2.0
-
----
-
-## License
-
-[MIT](LICENSE)
-
----
-
-If this project is useful to you, give it a star. It helps others find it.
+MIT License. Fork of [navbuildz/gmail-mcp-server](https://github.com/navbuildz/gmail-mcp-server), substantially restructured and extended.
