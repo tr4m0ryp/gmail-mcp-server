@@ -67,6 +67,15 @@ This Gmail MCP server turns any MCP-compatible AI client into a full-featured em
 | `apply_label` | Apply a label to an email. Creates the label if it doesn't exist |
 | `unsubscribe_email` | Auto-unsubscribe from mailing lists and newsletters |
 | `batch_process` | Fetch a batch of emails for triage. Supports `account="all"` |
+| `mark_read` / `mark_unread` | Toggle the UNREAD label on an email |
+| `trash_email` / `untrash_email` | Move an email to trash / restore it (reversible ~30 days) |
+| `batch_trash` | Trash many emails by query or ID list; capped by `max`, supports `dry_run` preview |
+| `delete_email` / `batch_delete` | PERMANENT deletion; requires `confirm:true` and the full Gmail scope (see below) |
+| `list_labels` | List all labels with IDs and types |
+| `remove_label` | Remove a label from an email (no-op if absent) |
+| `create_filter` | Create a Gmail filter (auto-label, auto-archive, or auto-trash future mail) |
+
+**Scopes:** trash, untrash, labels, and read-state work under `gmail.modify`. Filters need `gmail.settings.basic` (requested by default — accounts connected before this scope was added must be re-added via `/setup`). Permanent deletion (`delete_email`, `batch_delete`) is the one thing Gmail only allows under the full `https://mail.google.com/` scope: set `GMAIL_FULL_ACCESS=true`, restart, and re-add the account via `/setup` to enable it.
 
 ---
 
@@ -105,6 +114,7 @@ This Gmail MCP server turns any MCP-compatible AI client into a full-featured em
 | `GOOGLE_CLIENT_SECRET` | Your OAuth Client Secret |
 | `ENCRYPTION_KEY` | Any random string (32+ characters) |
 | `ADMIN_PASSWORD` | Password for the setup page |
+| `MCP_API_KEY` | (Recommended) Bearer token required on `/mcp` — without it the endpoint is open to anyone with the URL |
 | `SERVER_URL` | Your Railway app URL (e.g., `https://your-app.railway.app`) |
 | `PORT` | `3000` |
 

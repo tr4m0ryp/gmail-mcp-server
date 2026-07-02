@@ -1,11 +1,6 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes,
-  scryptSync,
-} from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { TokenCrypto } from "./crypto.js";
 
 // ---------------------------------------------------------------------------
 // Encrypted token store
@@ -14,8 +9,8 @@ import { join } from "node:path";
 // 1. File on disk (works if volume is mounted or running locally)
 // 2. TOKENS_DATA env var (base64-encoded JSON — survives Railway redeploys)
 //
-// On save: writes to both file AND logs the env var value so you can copy it.
-// On load: tries file first, falls back to TOKENS_DATA env var.
+// On load: tries file first, falls back to TOKENS_DATA.
+// The base64 export for TOKENS_DATA is shown on the /setup page.
 // ---------------------------------------------------------------------------
 
 interface StoredAccount {
@@ -28,64 +23,34 @@ interface StoreData {
   accounts: StoredAccount[];
 }
 
-const ALGORITHM = "aes-256-gcm";
-
-function dataDir(): string {
-  return process.env.DATA_DIR || "./data";
-}
-
-function dataFile(): string {
-  return join(dataDir(), "accounts.json");
-}
-
-function deriveKey(): Buffer {
-  const secret = process.env.ENCRYPTION_KEY;
-  if (!secret) {
-    throw new Error("ENCRYPTION_KEY environment variable is required");
-  }
-  return scryptSync(secret, "gmail-mcp-salt", 32);
-}
-
-function encrypt(plaintext: string): string {
-  const key = deriveKey();
-  const iv = randomBytes(16);
-  const cipher = createCipheriv(ALGORITHM, key, iv);
-  const encrypted = Buffer.concat([
-    cipher.update(plaintext, "utf8"),
-    cipher.final(),
-  ]);
-  const tag = cipher.getAuthTag();
-  return [iv.toString("hex"), tag.toString("hex"), encrypted.toString("hex")].join(":");
-}
-
-function decrypt(blob: string): string {
-  const key = deriveKey();
-  const [ivHex, tagHex, encHex] = blob.split(":");
-  const decipher = createDecipheriv(
-    ALGORITHM,
-    key,
-    Buffer.from(ivHex, "hex")
-  );
-  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
-  return Buffer.concat([
-    decipher.update(Buffer.from(encHex, "hex")),
-    decipher.final(),
-  ]).toString("utf8");
+export interface TokenStoreOptions {
+  dataDir: string;
+  crypto: TokenCrypto;
+  tokensData?: string;
 }
 
 export class TokenStore {
   private accounts = new Map<string, StoredAccount>();
+  private readonly dataDir: string;
+  private readonly crypto: TokenCrypto;
+  private readonly tokensData?: string;
 
-  constructor() {
+  constructor(options: TokenStoreOptions) {
+    this.dataDir = options.dataDir;
+    this.crypto = options.crypto;
+    this.tokensData = options.tokensData;
     this.load();
+  }
+
+  private dataFile(): string {
+    return join(this.dataDir, "accounts.json");
   }
 
   private load(): void {
     // Try file first
     try {
-      const dir = dataDir();
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      const file = dataFile();
+      if (!existsSync(this.dataDir)) mkdirSync(this.dataDir, { recursive: true });
+      const file = this.dataFile();
       if (existsSync(file)) {
         const raw: StoreData = JSON.parse(readFileSync(file, "utf8"));
         for (const acct of raw.accounts ?? []) {
@@ -99,18 +64,19 @@ export class TokenStore {
     }
 
     // Fall back to TOKENS_DATA env var
-    const envData = process.env.TOKENS_DATA;
-    if (envData) {
+    if (this.tokensData) {
       try {
         const raw: StoreData = JSON.parse(
-          Buffer.from(envData, "base64").toString("utf8")
+          Buffer.from(this.tokensData, "base64").toString("utf8")
         );
         for (const acct of raw.accounts ?? []) {
           this.accounts.set(acct.email, acct);
         }
-        console.log(`[token-store] Loaded ${this.accounts.size} account(s) from TOKENS_DATA env var`);
+        console.log(
+          `[token-store] Loaded ${this.accounts.size} account(s) from TOKENS_DATA env var`
+        );
         // Write to file so subsequent saves work
-        this.saveToFile();
+        this.save();
         return;
       } catch (err) {
         console.error("[token-store] Failed to parse TOKENS_DATA env var", err);
@@ -120,12 +86,11 @@ export class TokenStore {
     console.log("[token-store] No existing accounts found — starting fresh");
   }
 
-  private saveToFile(): void {
+  private save(): void {
     try {
-      const dir = dataDir();
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      if (!existsSync(this.dataDir)) mkdirSync(this.dataDir, { recursive: true });
       writeFileSync(
-        dataFile(),
+        this.dataFile(),
         JSON.stringify(
           { accounts: Array.from(this.accounts.values()) } satisfies StoreData,
           null,
@@ -137,16 +102,7 @@ export class TokenStore {
     }
   }
 
-  private save(): void {
-    this.saveToFile();
-
-    // Also output the base64-encoded data for the TOKENS_DATA env var
-    const data: StoreData = { accounts: Array.from(this.accounts.values()) };
-    const encoded = Buffer.from(JSON.stringify(data)).toString("base64");
-    console.log(`[token-store] TOKENS_DATA=${encoded}`);
-  }
-
-  /** Returns base64-encoded token data for copying to env var */
+  /** Returns base64-encoded token data for copying to the TOKENS_DATA env var */
   getTokensDataForExport(): string {
     const data: StoreData = { accounts: Array.from(this.accounts.values()) };
     return Buffer.from(JSON.stringify(data)).toString("base64");
@@ -155,7 +111,7 @@ export class TokenStore {
   addAccount(email: string, refreshToken: string): void {
     this.accounts.set(email, {
       email,
-      refreshToken: encrypt(refreshToken),
+      refreshToken: this.crypto.encrypt(refreshToken),
       addedAt: new Date().toISOString(),
     });
     this.save();
@@ -175,7 +131,7 @@ export class TokenStore {
     const acct = this.accounts.get(email);
     if (!acct) return null;
     try {
-      return decrypt(acct.refreshToken);
+      return this.crypto.decrypt(acct.refreshToken);
     } catch (err) {
       console.error(`[token-store] Failed to decrypt token for ${email}`, err);
       return null;
