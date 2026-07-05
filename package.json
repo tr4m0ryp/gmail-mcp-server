@@ -1,7 +1,7 @@
 {
   "name": "gmail-mcp-server",
-  "version": "1.1.0",
-  "description": "MCP server for Gmail — read, write, archive, label, unsubscribe",
+  "version": "1.2.0",
+  "description": "MCP server for Gmail — read, send, reply, drafts, archive, label, unsubscribe",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
