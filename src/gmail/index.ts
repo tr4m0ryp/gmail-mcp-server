@@ -7,3 +7,9 @@ export type {
 export type { LabelInfo } from "./labels.js";
 export type { BatchTrashRequest, BatchTrashResult } from "./batch.js";
 export type { FilterCriteria, FilterAction, CreatedFilter } from "./filters.js";
+export type {
+  OutgoingEmail,
+  SentEmail,
+  CreatedDraft,
+  DraftSummary,
+} from "./compose.js";
