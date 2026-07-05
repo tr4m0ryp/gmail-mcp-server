@@ -45,6 +45,10 @@ Claude Code / Cursor / curl              claude.ai (web connector)
 | `list_emails` | Search emails with Gmail query syntax. Supports `account="all"` |
 | `get_email` | Full content, headers, and parsed unsubscribe links |
 | `batch_process` | Fetch a batch of emails for triage. Supports `account="all"` |
+| `send_email` | Send a new email (plain text, optional HTML alternative) |
+| `reply_email` | Reply in-thread; recipients, `Re:` subject, and threading headers derived from the original; `reply_all` supported |
+| `create_draft` | Create a draft, optionally as a threaded reply via `reply_to_message_id` |
+| `send_draft` / `list_drafts` | Send a stored draft by ID / list drafts with recipients, subject, snippet |
 | `archive_email` | Remove an email from the inbox (stays in All Mail) |
 | `apply_label` / `remove_label` | Add or remove a label by name; labels are created on demand, removal is a clean no-op if absent |
 | `list_labels` | All labels with IDs and types |
