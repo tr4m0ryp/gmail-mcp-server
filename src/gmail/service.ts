@@ -272,6 +272,61 @@ export class GmailService {
     });
   }
 
+  async sendEmail(email: OutgoingEmail): Promise<SentEmail> {
+    return sendEmail(this.gmail, email);
+  }
+
+  /** Reply within the original thread; recipients derived from the original. */
+  async replyEmail(
+    messageId: string,
+    reply: { body: string; htmlBody?: string; replyAll: boolean; selfAddress: string }
+  ): Promise<SentEmail> {
+    const ctx = await buildReplyContext(this.gmail, messageId, reply);
+    return sendEmail(
+      this.gmail,
+      {
+        to: ctx.to,
+        cc: ctx.cc,
+        subject: ctx.subject,
+        body: reply.body,
+        htmlBody: reply.htmlBody,
+      },
+      ctx
+    );
+  }
+
+  async createDraft(
+    email: OutgoingEmail,
+    replyTo?: { messageId: string; replyAll: boolean; selfAddress: string }
+  ): Promise<CreatedDraft> {
+    if (!replyTo) return createDraft(this.gmail, email);
+
+    const ctx = await buildReplyContext(this.gmail, replyTo.messageId, replyTo);
+    return createDraft(
+      this.gmail,
+      {
+        // Explicit recipients/subject on the draft override the derived reply's.
+        to: email.to.length > 0 ? email.to : ctx.to,
+        cc: email.cc?.length ? email.cc : ctx.cc,
+        bcc: email.bcc,
+        subject: email.subject || ctx.subject,
+        body: email.body,
+        htmlBody: email.htmlBody,
+      },
+      ctx
+    );
+  }
+
+  async sendDraft(
+    draftId: string
+  ): Promise<{ id: string; threadId: string; labelIds: string[] }> {
+    return sendDraft(this.gmail, draftId);
+  }
+
+  async listDrafts(query?: string, maxResults?: number): Promise<DraftSummary[]> {
+    return listDrafts(this.gmail, query, maxResults);
+  }
+
   /** Same shape as listEmails — a triage batch for the model to decide on. */
   async batchProcess(
     query: string,
