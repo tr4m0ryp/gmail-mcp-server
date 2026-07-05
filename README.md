@@ -63,7 +63,7 @@ Claude Code / Cursor / curl              claude.ai (web connector)
 
 | Capability | Scope | Requested |
 |---|---|---|
-| Read, archive, label, trash, mark read | `gmail.modify` | Always |
+| Read, archive, label, trash, mark read, send, reply, drafts | `gmail.modify` | Always |
 | Filters (`create_filter`) | `gmail.settings.basic` | Always |
 | Permanent delete (`delete_email`, `batch_delete`) | `https://mail.google.com/` | Only with `GMAIL_FULL_ACCESS=true` |
 
