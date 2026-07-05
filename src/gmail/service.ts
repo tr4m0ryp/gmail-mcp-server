@@ -256,19 +256,10 @@ export class GmailService {
     toAddress: string,
     subject: string
   ): Promise<void> {
-    const raw = Buffer.from(
-      [
-        `To: ${toAddress}`,
-        `Subject: ${subject}`,
-        `Content-Type: text/plain; charset="UTF-8"`,
-        "",
-        "Unsubscribe",
-      ].join("\r\n")
-    ).toString("base64url");
-
-    await this.gmail.users.messages.send({
-      userId: "me",
-      requestBody: { raw },
+    await sendEmail(this.gmail, {
+      to: [toAddress],
+      subject,
+      body: "Unsubscribe",
     });
   }
 
