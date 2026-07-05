@@ -25,13 +25,15 @@ src/
   auth/         token encryption (crypto.ts), persistence (token-store.ts),
                 OAuth2 client factory (google.ts)
   gmail/        Gmail API domain: service.ts (GmailService), types.ts,
-                body.ts (MIME extraction), links.ts (unsubscribe discovery),
-                unsubscribe.ts (RFC 8058 flow), labels.ts (name->id, create),
-                batch.ts (batch_trash cap/dry-run/batchModify), filters.ts,
-                errors.ts (missing-scope 403 -> actionable hint)
+                body.ts (MIME extraction), mime.ts (MIME building, CRLF-safe
+                headers, RFC 2047), compose.ts (send/reply/drafts),
+                links.ts (unsubscribe discovery), unsubscribe.ts (RFC 8058
+                flow), labels.ts (name->id, create), batch.ts (batch_trash
+                cap/dry-run/batchModify), filters.ts, errors.ts
+                (missing-scope 403 -> actionable hint)
   mcp/          accounts.ts (account -> GmailService, cached OAuth clients),
                 server.ts (McpServer factory), tools/ (search.ts, message.ts,
-                trash.ts, labels.ts, shared.ts)
+                compose.ts, trash.ts, labels.ts, shared.ts)
   http/         app.ts (assembly), admin.ts (auth middleware + safeEqual),
                 setup.ts, oauth.ts (nonce state store), mcp.ts (transport),
                 mcp-auth.ts (bearer + AuthKit JWT auth, RFC 9728 metadata),
