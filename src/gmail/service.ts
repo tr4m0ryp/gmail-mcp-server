@@ -6,6 +6,17 @@ import { attemptUnsubscribe } from "./unsubscribe.js";
 import { findLabelId, getOrCreateLabel, listLabels, LabelInfo } from "./labels.js";
 import { batchTrash, BatchTrashRequest, BatchTrashResult } from "./batch.js";
 import { createFilter, FilterCriteria, FilterAction, CreatedFilter } from "./filters.js";
+import {
+  sendEmail,
+  buildReplyContext,
+  createDraft,
+  sendDraft,
+  listDrafts,
+  OutgoingEmail,
+  SentEmail,
+  CreatedDraft,
+  DraftSummary,
+} from "./compose.js";
 import { withScopeHint, FULL_SCOPE_HINT, SETTINGS_SCOPE_HINT } from "./errors.js";
 
 // Cap on concurrent per-message metadata fetches (Gmail API rate limits).
