@@ -8,6 +8,7 @@ Google OAuth managed server-side, refresh tokens encrypted at rest.
 - `npm run dev` — tsx watch mode
 - `npm run build` — tsc to `dist/`
 - `npm start` — run `dist/index.js`
+- `npm test` — `node:test` suites in `test/` (run via tsx)
 
 Required env: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ADMIN_PASSWORD`,
 `ENCRYPTION_KEY`. Recommended: `MCP_API_KEY` (static bearer on `/mcp`) and/or
@@ -35,6 +36,7 @@ src/
                 server.ts (McpServer factory), tools/ (search.ts, message.ts,
                 compose.ts, trash.ts, labels.ts, shared.ts)
   http/         app.ts (assembly), admin.ts (auth middleware + safeEqual),
+                login-limiter.ts (failed admin-login throttling),
                 setup.ts, oauth.ts (nonce state store), mcp.ts (transport),
                 mcp-auth.ts (bearer + AuthKit JWT auth, RFC 9728 metadata),
                 html.ts (escaping)
@@ -54,6 +56,9 @@ relative imports need explicit `.js` extensions.
   never silently as empty results.
 - Anything rendered into setup-page HTML from request or account data goes
   through `escapeHtml()`. Secrets are compared with `safeEqual()`, never `===`.
+- Every admin-key path goes through the single `requireAdmin` built in
+  `app.ts`, which shares one `LoginLimiter` (per-IP + global failure caps,
+  429 + Retry-After). Client IP comes from `req.ip` under `TRUST_PROXY`.
 - The OAuth `state` param is a single-use server-side nonce — never put
   secrets or user data in it.
 - Destructive tools return exactly what they acted on (IDs + count). Batch

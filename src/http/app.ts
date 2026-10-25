@@ -6,6 +6,8 @@ import { setupRoutes } from "./setup.js";
 import { oauthRoutes } from "./oauth.js";
 import { mcpRoutes } from "./mcp.js";
 import { wellKnownRoutes } from "./mcp-auth.js";
+import { makeRequireAdmin } from "./admin.js";
+import { LoginLimiter } from "./login-limiter.js";
 
 export interface AppDeps {
   config: Config;
@@ -15,6 +17,7 @@ export interface AppDeps {
 
 export function buildApp(deps: AppDeps): Express {
   const app = express();
+  app.set("trust proxy", deps.config.trustProxy);
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
@@ -25,8 +28,13 @@ export function buildApp(deps: AppDeps): Express {
     });
   });
 
-  app.use(setupRoutes(deps));
-  app.use(oauthRoutes(deps));
+  // One limiter shared by every admin-key path, so failures count together.
+  const requireAdmin = makeRequireAdmin(
+    deps.config.adminPassword,
+    new LoginLimiter(deps.config.adminLoginLimits)
+  );
+  app.use(setupRoutes({ ...deps, requireAdmin }));
+  app.use(oauthRoutes({ ...deps, requireAdmin }));
   app.use(mcpRoutes(deps));
 
   const wellKnown = wellKnownRoutes(deps.config);

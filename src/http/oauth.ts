@@ -1,10 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, RequestHandler } from "express";
 import { google } from "googleapis";
 import type { Config } from "../config.js";
 import { TokenStore, makeOAuth2Client } from "../auth/index.js";
 import { AccountService } from "../mcp/index.js";
-import { safeEqual } from "./admin.js";
+import { readAdminKey } from "./admin.js";
 
 // ---------------------------------------------------------------------------
 // OAuth flow — server-managed Google auth.
@@ -20,9 +20,16 @@ export interface OAuthDeps {
   config: Config;
   store: TokenStore;
   accounts: AccountService;
+  /** Shared admin guard (key check + failed-login throttling). */
+  requireAdmin: RequestHandler;
 }
 
-export function oauthRoutes({ config, store, accounts }: OAuthDeps): Router {
+export function oauthRoutes({
+  config,
+  store,
+  accounts,
+  requireAdmin,
+}: OAuthDeps): Router {
   const router = Router();
   const pendingStates = new Map<string, { adminKey: string; expires: number }>();
 
@@ -44,12 +51,8 @@ export function oauthRoutes({ config, store, accounts }: OAuthDeps): Router {
     return entry.adminKey;
   }
 
-  router.get("/oauth/start", (req: Request, res: Response) => {
-    const key = req.query.key as string | undefined;
-    if (!key || !safeEqual(key, config.adminPassword)) {
-      res.status(401).send("Unauthorized");
-      return;
-    }
+  router.get("/oauth/start", requireAdmin, (req: Request, res: Response) => {
+    const key = readAdminKey(req) ?? "";
 
     const oauth2 = makeOAuth2Client(config);
     const url = oauth2.generateAuthUrl({

@@ -91,6 +91,9 @@ Environment variables (see `.env.example`):
 | `WORKOS_AUTHKIT_DOMAIN` | AuthKit tenant for claude.ai OAuth (optional) |
 | `GMAIL_FULL_ACCESS` | `true` to request the permanent-deletion scope |
 | `DATA_DIR` / `TOKENS_DATA` | Token storage directory / base64 env fallback |
+| `ADMIN_LOGIN_MAX_FAILURES` / `ADMIN_LOGIN_WINDOW_MINUTES` / `ADMIN_LOGIN_LOCKOUT_MINUTES` | Failed admin logins per IP before lockout (default 5 in 15 min, locked 15 min; HTTP 429 + `Retry-After`) |
+| `ADMIN_LOGIN_GLOBAL_MAX_FAILURES` | Failed admin logins across all IPs per window before every attempt is refused (default 50, `0` = off) |
+| `TRUST_PROXY` | Express `trust proxy` for the real client IP from `X-Forwarded-For` (default `loopback, uniquelocal`; keep the app reachable only through your reverse proxy) |
 
 Without `MCP_API_KEY` **and** without `WORKOS_AUTHKIT_DOMAIN`, `/mcp` is unauthenticated — anyone with the URL can read every connected mailbox. The server warns loudly at startup; do not run a public deployment that way.
 

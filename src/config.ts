@@ -2,6 +2,16 @@
 // Config — reads and validates environment at startup (fail fast)
 // ---------------------------------------------------------------------------
 
+/** Failed admin-login throttling (see http/login-limiter.ts). */
+export interface LoginLimits {
+  /** Failures per IP inside `windowMs` that trigger a lockout. */
+  maxFailures: number;
+  windowMs: number;
+  lockoutMs: number;
+  /** Failures across all IPs inside `windowMs` that block every attempt (0 = off). */
+  globalMaxFailures: number;
+}
+
 export interface Config {
   port: number;
   serverUrl: string;
@@ -23,6 +33,9 @@ export interface Config {
   tokensData?: string;
   /** OAuth scopes requested when connecting accounts (GMAIL_FULL_ACCESS widens them). */
   scopes: string[];
+  /** Express `trust proxy`: which hops may set X-Forwarded-For (real client IP). */
+  trustProxy: boolean | number | string;
+  adminLoginLimits: LoginLimits;
 }
 
 // gmail.modify covers read/trash/labels; settings.basic adds filter management.
@@ -52,6 +65,23 @@ export function loadConfig(): Config {
   const adminPassword = required("ADMIN_PASSWORD");
   const encryptionKey = required("ENCRYPTION_KEY");
 
+  const intEnv = (name: string, fallback: number, min: number): number => {
+    const raw = process.env[name];
+    if (raw === undefined || raw === "") return fallback;
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < min) {
+      throw new Error(`${name} must be an integer >= ${min} (got "${raw}")`);
+    }
+    return value;
+  };
+  const MINUTE = 60 * 1000;
+  const adminLoginLimits: LoginLimits = {
+    maxFailures: intEnv("ADMIN_LOGIN_MAX_FAILURES", 5, 1),
+    windowMs: intEnv("ADMIN_LOGIN_WINDOW_MINUTES", 15, 1) * MINUTE,
+    lockoutMs: intEnv("ADMIN_LOGIN_LOCKOUT_MINUTES", 15, 1) * MINUTE,
+    globalMaxFailures: intEnv("ADMIN_LOGIN_GLOBAL_MAX_FAILURES", 50, 0),
+  };
+
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
   }
@@ -71,5 +101,18 @@ export function loadConfig(): Config {
     dataDir: process.env.DATA_DIR || "./data",
     tokensData: process.env.TOKENS_DATA || undefined,
     scopes: process.env.GMAIL_FULL_ACCESS === "true" ? FULL_SCOPES : BASE_SCOPES,
+    trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
+    adminLoginLimits,
   };
+}
+
+/**
+ * Default trusts loopback + private ranges: the app binds 127.0.0.1 behind
+ * Caddy, and Docker's port proxy connects from the bridge gateway.
+ */
+function parseTrustProxy(raw: string | undefined): boolean | number | string {
+  if (!raw) return "loopback, uniquelocal";
+  if (raw === "true" || raw === "false") return raw === "true";
+  if (/^\d+$/.test(raw)) return Number(raw);
+  return raw;
 }

@@ -1,8 +1,8 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, RequestHandler } from "express";
 import type { Config } from "../config.js";
 import { TokenStore } from "../auth/index.js";
 import { AccountService } from "../mcp/index.js";
-import { makeRequireAdmin } from "./admin.js";
+import { readAdminKey } from "./admin.js";
 import { renderSetupPage } from "./views/index.js";
 
 // ---------------------------------------------------------------------------
@@ -13,15 +13,20 @@ export interface SetupDeps {
   config: Config;
   store: TokenStore;
   accounts: AccountService;
+  requireAdmin: RequestHandler;
 }
 
-export function setupRoutes({ config, store, accounts }: SetupDeps): Router {
+export function setupRoutes({
+  config,
+  store,
+  accounts,
+  requireAdmin,
+}: SetupDeps): Router {
   const router = Router();
-  const requireAdmin = makeRequireAdmin(config.adminPassword);
 
   router.get("/setup", requireAdmin, (req: Request, res: Response) => {
     const connected = store.listAccounts();
-    const key = req.query.key as string;
+    const key = readAdminKey(req) ?? "";
     const message = req.query.message as string | undefined;
 
     res.send(
@@ -40,7 +45,7 @@ export function setupRoutes({ config, store, accounts }: SetupDeps): Router {
 
   router.post("/setup/remove", requireAdmin, (req: Request, res: Response) => {
     const email = req.body.email;
-    const key = req.query.key as string;
+    const key = readAdminKey(req) ?? "";
 
     if (email && store.hasAccount(email)) {
       store.removeAccount(email);
